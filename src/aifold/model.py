@@ -3,6 +3,7 @@
 Ties together all components into the complete v0.1 architecture.
 """
 
+import copy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -42,12 +43,41 @@ class AIModel(nn.Module):
         self.confidence_head = ConfidenceHead(config)
         self.ranking_head = RankingHead(config)
         
-        # Optional: Action decoder from latent
+        # Action decoder from latent (per timestep)
         self.action_decoder = nn.Sequential(
             nn.Linear(config.d_Z, config.d_H * 2),
             nn.GELU(),
-            nn.Linear(config.d_H * 2, config.d_H),
+            nn.Linear(config.d_H * 2, config.num_action_classes),
         )
+        
+        # EMA model for inference
+        self.ema_decay = 0.999
+        self.ema_model = None
+        self._init_ema()
+    
+    def _init_ema(self):
+        """Initialize EMA model as a copy of main model."""
+        import copy
+        self.ema_model = copy.deepcopy(self)
+        for param in self.ema_model.parameters():
+            param.requires_grad = False
+    
+    @torch.no_grad()
+    def update_ema(self):
+        """Update EMA model parameters."""
+        if self.ema_model is None:
+            return
+        for ema_param, param in zip(self.ema_model.parameters(), self.parameters()):
+            ema_param.mul_(self.ema_decay).add_(param, alpha=1 - self.ema_decay)
+        
+        for ema_buf, buf in zip(self.ema_model.buffers(), self.buffers()):
+            ema_buf.copy_(buf)
+    
+    def get_ema_model(self):
+        """Get EMA model for inference."""
+        if self.ema_model is None:
+            self._init_ema()
+        return self.ema_model
     
     def encode_input(
         self,
@@ -226,12 +256,21 @@ class AIModel(nn.Module):
         top_Z = torch.gather(Z_candidates, 1, top_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, Z_candidates.shape[2], Z_candidates.shape[3]))
         top_Z = top_Z.squeeze(1)  # [B, T, d_Z]
         
-        # Decode to actions
-        action_logits = []
-        for t in range(top_Z.shape[1]):
-            logits = self.action_decoder(top_Z[:, t])
-            action_logits.append(logits)
-        outputs['action_logits'] = torch.stack(action_logits, dim=1)  # [B, T, num_actions]
+        # Decode to actions (for all timesteps)
+        action_logits = torch.stack([
+            self.action_decoder(top_Z[:, t]) for t in range(top_Z.shape[1])
+        ], dim=1)  # [B, T, num_action_classes]
+        outputs['action_logits'] = action_logits
+        
+        # Action classification loss (direct supervision)
+        if target_actions is not None:
+            action_loss = F.cross_entropy(
+                action_logits.reshape(-1, action_logits.shape[-1]),
+                target_actions.reshape(-1),
+                ignore_index=-1,
+                label_smoothing=0.1
+            )
+            outputs['action_loss'] = action_loss
         
         # Also decode state predictions
         state_pred = self.decode_state(top_Z.mean(dim=1), H, P)

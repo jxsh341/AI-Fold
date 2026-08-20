@@ -23,7 +23,7 @@ class ModelConfig:
     # Latent diffusion
     num_diffusion_blocks: int = 12
     num_diffusion_heads: int = 16
-    num_diffusion_steps: int = 32       # Parameterized for ablation
+    num_diffusion_steps: int = 64       # Increased from 32 for better quality
     sigma_data: float = 1.0
     sigma_min: float = 0.002
     sigma_max: float = 80.0
@@ -36,6 +36,9 @@ class ModelConfig:
     # Trajectory
     horizon_T: int = 8                  # Future steps
     step_duration: float = 1.0          # Fixed duration per step
+    
+    # Action space
+    num_action_classes: int = 23        # Matches RelationTypeConfig.NUM_TYPES
     
     # Training
     dropout: float = 0.1
