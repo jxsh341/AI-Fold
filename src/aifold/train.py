@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from typing import Dict, Any, Optional
@@ -34,6 +35,9 @@ class TrainingConfig:
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     seed: int = 42
     num_workers: int = 4
+    
+    # Gradient accumulation
+    gradient_accumulation_steps: int = 4
     
     # Loss weights
     diffusion_weight: float = 1.0
@@ -223,7 +227,8 @@ def train(config: TrainingConfig):
     
     # Optimizer and scheduler
     optimizer = create_optimizer(model, config)
-    num_training_steps = len(train_loader) * config.num_epochs
+    # Effective steps account for gradient accumulation
+    num_training_steps = (len(train_loader) // config.gradient_accumulation_steps) * config.num_epochs
     scheduler = create_scheduler(optimizer, config, num_training_steps)
     
     # Training loop
@@ -235,52 +240,56 @@ def train(config: TrainingConfig):
         epoch_losses = {}
         
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{config.num_epochs}")
-        for batch in pbar:
+        for batch_idx, batch in enumerate(pbar):
             batch = {k: v.to(config.device) if isinstance(v, torch.Tensor) else v 
                      for k, v in batch.items()}
             
-            optimizer.zero_grad()
+            # Compute loss with gradient accumulation scaling
             loss, losses = compute_loss(model, batch, config)
+            loss = loss / config.gradient_accumulation_steps
             loss.backward()
             
-            # Gradient clipping
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
-            
-            optimizer.step()
-            scheduler.step()
-            
-            # Accumulate losses
-            for k, v in losses.items():
-                epoch_losses[k] = epoch_losses.get(k, 0) + v
-            
-            global_step += 1
-            
-            # Logging
-            if global_step % config.log_interval == 0:
-                pbar.set_postfix({k: f"{v:.4f}" for k, v in losses.items()})
-            
-            # Evaluation
-            if global_step % config.eval_interval == 0:
-                val_losses = evaluate(model, val_loader, config, config.device)
-                print(f"\nStep {global_step} Validation: {val_losses}")
+            # Step optimizer every gradient_accumulation_steps
+            if (batch_idx + 1) % config.gradient_accumulation_steps == 0:
+                # Gradient clipping
+                torch.nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
                 
-                # Save best model
-                if val_losses.get('total_loss', float('inf')) < best_val_loss:
-                    best_val_loss = val_losses['total_loss']
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
+                
+                global_step += 1
+                
+                # Logging
+                if global_step % config.log_interval == 0:
+                    pbar.set_postfix({k: f"{v:.4f}" for k, v in losses.items()})
+                
+                # Evaluation
+                if global_step % config.eval_interval == 0:
+                    val_losses = evaluate(model, val_loader, config, config.device)
+                    print(f"\nStep {global_step} Validation: {val_losses}")
+                    
+                    # Save best model
+                    if val_losses.get('total_loss', float('inf')) < best_val_loss:
+                        best_val_loss = val_losses['total_loss']
+                        torch.save({
+                            'step': global_step,
+                            'model_state_dict': model.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'val_losses': val_losses,
+                        }, output_dir / 'best_model.pt')
+                
+                # Checkpoint
+                if global_step % config.save_interval == 0:
                     torch.save({
                         'step': global_step,
                         'model_state_dict': model.state_dict(),
                         'optimizer_state_dict': optimizer.state_dict(),
-                        'val_losses': val_losses,
-                    }, output_dir / 'best_model.pt')
+                    }, output_dir / f'checkpoint_{global_step}.pt')
             
-            # Checkpoint
-            if global_step % config.save_interval == 0:
-                torch.save({
-                    'step': global_step,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                }, output_dir / f'checkpoint_{global_step}.pt')
+            # Accumulate losses (scale back for logging)
+            for k, v in losses.items():
+                epoch_losses[k] = epoch_losses.get(k, 0) + v
         
         # Epoch summary
         avg_losses = {k: v / len(train_loader) for k, v in epoch_losses.items()}

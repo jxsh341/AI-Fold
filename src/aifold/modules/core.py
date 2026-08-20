@@ -402,6 +402,7 @@ class RelationalBlock(nn.Module):
         super().__init__()
         self.d_H = config.d_H
         self.d_P = config.d_P
+        self.stochastic_depth_prob = config.stochastic_depth_prob
         
         # Pair updates
         self.pair_row_attn = AxialAttention(config.d_P, config.num_heads, axis='row')
@@ -421,6 +422,11 @@ class RelationalBlock(nn.Module):
         P: torch.Tensor,           # [N, N, d_P]
         mask: Optional[torch.Tensor] = None,  # [N]
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        
+        # Stochastic depth: randomly skip block during training
+        if self.training and self.stochastic_depth_prob > 0:
+            if torch.rand(1).item() < self.stochastic_depth_prob:
+                return H, P  # Skip this block entirely
         
         # Pair updates
         P = self.pair_row_attn(P, mask)

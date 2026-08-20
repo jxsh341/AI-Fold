@@ -16,6 +16,7 @@ class ModelConfig:
     # Relational trunk
     num_relational_blocks: int = 8
     num_heads: int = 16
+    stochastic_depth_prob: float = 0.1  # Stochastic depth drop probability
     
     # Recycling
     num_recycles: int = 4
