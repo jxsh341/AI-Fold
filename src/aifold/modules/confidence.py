@@ -102,7 +102,7 @@ class ConfidenceHead(nn.Module):
         
         # Bin centers for expected value computation
         self.register_buffer('entity_bin_centers', 
-                           torch.linspace(0.5, 99.5, 50) * 2.0)  # [0, 100]
+                           torch.linspace(0.5, 99.5, 50))  # [0, 100]
         self.register_buffer('pair_bin_centers',
                            torch.linspace(0.25, 31.75, 64))  # [0, 32]
     

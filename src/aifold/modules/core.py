@@ -61,8 +61,7 @@ class EntityEncoder(nn.Module):
         )
         
         # Learnable attribute defaults per type
-        self.register_buffer(
-            "default_attributes", 
+        self.default_attributes = nn.Parameter(
             torch.zeros(self.num_types, config.d_H)
         )
     
@@ -359,39 +358,45 @@ class SelfAttentionWithPairBias(nn.Module):
 class TriRelBlock(nn.Module):
     """Optional TriRel block for Experiment H.
     
-    P_ij += f(P_ik, P_kj) aggregated over k
+    Triangular multiplication (as in AF3):
+    - Outgoing: sum_k P_ik * W * P_kj^T  (elementwise per channel)
+    - Incoming: sum_k P_ki * W * P_kj^T
+    
+    We implement the outgoing version: P_ij += sum_k P_ik * W * P_kj^T
     """
     
     def __init__(self, d_P: int):
         super().__init__()
         self.d_P = d_P
-        # Bilinear combination: P_ik W P_kj
-        self.W = nn.Parameter(torch.randn(d_P, d_P) * 0.02)
+        # Per-channel scaling for triangular multiplication
+        self.W = nn.Parameter(torch.ones(d_P) * 0.02)
         self.norm = nn.LayerNorm(d_P)
         self.proj = nn.Linear(d_P, d_P)
     
     def forward(self, P: torch.Tensor) -> torch.Tensor:
-        """P: [N, N, d_P]"""
-        N = P.shape[0]
-        P_norm = self.norm(P)
+        """P: [N, N, d_P] or [B, N, N, d_P]"""
+        # Handle both batched and unbatched
+        if P.dim() == 3:
+            has_batch = False
+            P = P.unsqueeze(0)  # [1, N, N, d_P]
+        else:
+            has_batch = True
+        B, N, _, d_P = P.shape
         
-        # P_ik @ W @ P_kj^T aggregated over k
-        # [N, N, d_P] @ [d_P, d_P] @ [N, N, d_P]^T
-        # Efficient: (P @ W) @ P.transpose(-2, -1) but we need per-pair
+        P_norm = self.norm(P)  # [B, N, N, d_P]
         
-        # For each i,j: sum_k P_ik W P_kj^T
-        # This is: (P @ W) @ P.transpose(-2, -1) = [N, N, N] - too large
-        # Use low-rank approximation or chunking
+        # Triangular multiplication (outgoing): sum_k P_ik * W * P_kj^T
+        # P_norm: [B, N, N, d_P]
+        # We want: for each i,j: sum_k P[i,k] * W * P[j,k] (elementwise per channel)
+        # Using einsum: b i k d, b j k d, d -> b i j d
+        update = torch.einsum('bikd,bjkd,d->bijd', P_norm, P_norm, self.W)
         
-        # Simple approximation: mean over k of P_ik * P_kj
-        P_left = P_norm[:, :, None, :]   # [N, N, 1, d_P]
-        P_right = P_norm[None, :, :, :]  # [1, N, N, d_P]
+        update = self.proj(update)
         
-        # Element-wise product + project
-        combined = P_left * P_right      # [N, N, N, d_P]
-        combined = combined.mean(dim=2)  # [N, N, d_P] average over k
+        if not has_batch:
+            P = P.squeeze(0)
+            update = update.squeeze(0)
         
-        update = self.proj(combined)
         return P + update
 
 
