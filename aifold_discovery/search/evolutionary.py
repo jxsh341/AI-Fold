@@ -43,6 +43,10 @@ class RLTrainHook:
     just increments the step counter.
     """
 
+    # True only when this hook actually updates weights. Governs whether
+    # RL-side mutations may be sampled (they are inert otherwise).
+    trains_weights: bool = False
+
     def __init__(self, enabled: bool = False):
         self.enabled = enabled
 
@@ -212,7 +216,10 @@ class DiscoveryEngine:
             if use_crossover:
                 genome, label = self.crossover.crossover(parent_a.genome, parent_b.genome)
             else:
-                genome, label = self.mutator.mutate(parent_a.genome, bottleneck_axis=axis)
+                allow_rl = bool(getattr(self.rl_hook, "trains_weights", False))
+                genome, label = self.mutator.mutate(parent_a.genome,
+                                                    bottleneck_axis=axis,
+                                                    allow_rl=allow_rl)
 
             child = Candidate(genome=genome)
             child.status = "unevaluated"

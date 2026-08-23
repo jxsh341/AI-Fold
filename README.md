@@ -2,32 +2,46 @@
 
 **An AlphaFold-inspired discovery engine for AI systems — plus an AF3-derived neural substrate for trajectory prediction.**
 
-## Headline live result
+> **Read this first:** the live results below are *signal, not a powered study*.
+> Each mutation's effect rests on n≈1–3 evaluated lineages; treat every number
+> as directional. A powered version = ≥10 lineages per mutation × 3 seeds,
+> ~5k calls per mutation class. What the runs *do* establish end-to-end: the
+> loop closes, metrics are unbiased, and selection rejects harmful structure.
 
-Run with `--pure-baseline` (one plain agent seed, no hand-designed structure, hard tasks, live LLM):
+## Headline live finding (and the retraction that makes it credible)
+
+Across five live sweeps (~1,100 real LLM calls, zero unhandled failures), the
+most robust result is **negative-space**:
 
 ```
-[cross-generation best-composite trajectory]        # 93 real LLM calls, 4 generations
-  generation 0: best composite = 0.500              # plain baseline
-  generation 1: best composite = 0.500
-  generation 2: best composite = 0.622              # ← evolution's find
-  generation 3: best composite = 0.644
+With the verifier gene seeded (3 sweeps):        it held rank #1 in ALL generations;
+                                                 9 tested structural additions never beat it.
+Pure-baseline, all genes behaviorally grounded:  NO structural addition beat the plain
+                                                 baseline either. Two were reliably harmful:
 
-Mutation effectiveness (child composite − strongest parent):
-  rl_steps_200->300        +0.206     ← discovered & fixed: budget-starved lineage
-  crossover[rl_budget]     +0.058     ← amplified it
-  add_episodic_memory      −0.206     ← tested, rejected by selection
+   conditional_router   −0.115 vs-parent   (extra deliberate-path calls not recovered)
+   crossover[clone_a]   −0.197             (children that fail to inherit the load-bearing component)
+
+   add_episodic_memory  −0.206             (rejected by selection in an earlier sweep;
+                                            sign consistent, n too small to bank)
 ```
 
-Starting from a single unstructured baseline, the search autonomously produced,
-measured, and promoted a structural lineage that raised composite fitness
-**+0.144** — while independently measuring and rejecting a harmful memory
-augmentation. Every number above came from real model calls scored by local
-verifiers; nothing is simulated.
+And the part we consider more valuable than any single number: **our first
+"positive" result was wrong, and the pipeline caught it.** An initial
+pure-baseline sweep showed a +0.144 cross-generation climb. Probing *which*
+mutation caused it revealed both winning genes (`rl_steps`, `conditional_router`
+as then implemented) were **phenotypically silent** — they changed nothing at
+inference time, so the climb was episode-sampling noise riding inert lineages.
+We implemented the router for real, quarantined RL-only mutations behind a
+`trains_weights` flag, fixed a vs-parent metric bias that compared partial child
+composites against full parent composites, and re-ran. The climb disappeared.
+That retraction — published with the debugging trail — is the existence proof
+that fitness attribution in this system tracks *behavior*, not lineage labels.
 
-*Honest caveat: per-mutation attribution rests on n≈1–3 evaluated lineages —
-this is a demonstration that the full loop closes end-to-end, not a powered
-study.*
+*(Answering the obvious plateau question directly: generations 0–1 were flat in
+the first sweep because the only mutations sampled were silent or neutral; the
+"jump" arrived exactly when an inert gene got sampled. Post-fix, with sampling
+restricted to live-active genes, flat-everything is the true picture at this budget.)*
 
 AI-Fold asks a different question than ordinary agent frameworks:
 
@@ -39,6 +53,16 @@ It does this in two layers:
 2. **Neural Substrate** (`src/aifold/`) — an AlphaFold 3-derived model that represents AI systems as typed relational graphs (entities + relations), refines them with recycling, and generates *distributions over future trajectories* via latent diffusion with confidence ranking.
 
 The strict boundary: **RL optimizes candidates; AI-Fold evolves candidates.**
+
+---
+
+### Infrastructure reliability (separate from the science)
+
+| Claim | Evidence |
+|---|---|
+| Survives free-tier rate limits | retry w/ exponential backoff + jitter rode out a 64-consecutive-429 storm |
+| Scales to real sweeps | concurrent episodes + candidate-level parallelism; 234-call sweep in ~7 min |
+| Deterministic scoring | all four environments verified locally (exact-match, executed unit tests, needle lookup) — no judge model in the measurement path |
 
 ---
 
@@ -54,16 +78,13 @@ AIFOLD_API_KEY=nvapi-...
 AIFOLD_MODEL=meta/llama-3.1-8b-instruct
 EOF
 
-# The headline experiment: force evolution to discover structure itself
+# Decisive experiment: no hand-designed seeds, only live-active mutations,
+# RL-side mutations quarantined until a weight trainer is wired.
 python run_live_discovery.py --generations 4 --pop-size 10 --group-size 6 \
     --n-envs 3 --difficulty hard --pure-baseline --max-calls 4500
-
-# Or reproduce the seeded sweep (verifier handed to gen-0; verification held #1
-# for all 4 generations — no mutation ever beat it across 3 sweeps)
-python run_live_discovery.py --generations 3 --pop-size 8 --group-size 4
 ```
 
-Backends auto-detected in order: `AIFOLD_BASE_URL` → `OPENAI_API_KEY` → `GROQ_API_KEY` → `NVAPI_KEY` → local Ollama/vLLM probes. Retries with exponential backoff handle free-tier rate limits (verified through a 64-consecutive-429 storm).
+Backends auto-detected in order: `AIFOLD_BASE_URL` → `OPENAI_API_KEY` → `GROQ_API_KEY` → `NVAPI_KEY` → local Ollama/vLLM probes.
 
 ---
 
@@ -146,14 +167,9 @@ Registry entries can equally point at real **Atropos** `BaseEnv` classes (`env_f
 
 ### Scientific memory
 
-Every experiment persists full provenance to `aifold_runs/experiments/all_records.jsonl`: genome snapshot → environment → trajectory group → per-axis fitness delta → **vs-parent delta** (child composite − strongest parent, on common measured axes — the mutation-effectiveness signal) → failure diagnosis → mutation lineage.
+Every experiment persists full provenance to `aifold_runs/experiments/all_records.jsonl`: genome snapshot → environment → trajectory group → per-axis fitness delta → **vs-parent delta** (child vs strongest parent, computed on common measured axes so partial evaluations never bias the comparison) → failure diagnosis → mutation lineage.
 
-Three live sweeps (540+ real calls) established two reproducible facts:
-
-1. **Verification dominates.** With the verifier gene seeded, it held rank #1 across all generations of three independent sweeps; every one of 9 tested structural additions measured neutral-to-harmful (`conditional_router` −0.13…−0.16, unfaithful crossovers −0.19…−0.31).
-2. **`working_memory_size` causally gates the memory environment.** Needle-in-haystack pass rate sits at ~0.25–0.30 precisely because 8-line context assembly hides the needle in most episodes — the gene, not the model, is the bottleneck.
-
-And with hand-designed seeds removed (`--pure-baseline`), the loop discovered its own improvement: **+0.144 composite over 4 generations**, led by an RL-budget lineage (+0.206 vs-parent) and rejecting episodic memory (−0.206).
+Mutation sampling respects a phenotype contract: mutations are tagged `live` (changes inference behavior of the scaffold) or `rl` (inert without a weight trainer). RL-mode mutations cannot be sampled — or credited — until `GrpoHook` is wired, which closes the silent-gene hole that produced the retracted +0.144 result.
 
 ### Going fully live with Atropos RL
 
@@ -249,11 +265,12 @@ AI-Fold/
 
 ## Status & honest caveats
 
-- ✅ Live evolution verified on NVIDIA NIM (~65 calls / small sweep; scale linearly with population × generations)
-- ✅ Neural substrate forward/backward/sampling verified; not yet trained to convergence on real trajectory corpora
-- ⚠️ Free-tier NIM keys are rate-limited: use `--max-concurrency 2` on larger sweeps
-- ⚠️ Weight-training hook requires GPU infrastructure (see `live/trainer.py::GrpoHook`)
-- ⚠️ Fitness attribution currently uses pass-rate/variance heuristics; calibration is future work
+- ✅ Live loop closed end-to-end across 5 sweeps (~1,100 calls, 0 unhandled errors)
+- ✅ Metric-integrity trail published: one false positive caught & retracted, one metric bias found & fixed before publication
+- ⚠️ All live findings are directional (n≈1–3 lineages per mutation) — powered study spec in the header note
+- ⚠️ Baseline composite quantizes coarsely at current episode counts (4–6 episodes/axis); resolution limits detectable effect sizes
+- ⚠️ Neural substrate verified mechanically (forward/backward/sampling), not yet trained to convergence on real trajectory corpora
+- ⚠️ Weight-training hook requires GPU infrastructure (`live/trainer.py::GrpoHook`)
 
 ## License
 

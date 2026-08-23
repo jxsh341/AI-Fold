@@ -114,39 +114,51 @@ def _m_bigger_rl_budget(g: CandidateGenome) -> str:
 
 
 MUTATIONS = [
-    ("add_verifier",           "self_correction", _m_add_verifier),
-    ("add_episodic_memory",    "memory",          _m_add_episodic_memory),
-    ("add_semantic_memory",    "generalization",  _m_add_semantic_memory),
-    ("expand_working_memory",  "memory",          _m_expand_working_memory),
-    ("enable_decomposition",   "planning",        _m_enable_decomposition),
-    ("upgrade_search",         "planning",        _m_upgrade_search),
-    ("deepen_search",          "planning",        _m_deepen_search),
-    ("add_tool_code",          "coding",          _m_add_tool_code),
-    ("add_tool_browser",       "tool_use",        _m_add_tool_browser),
-    ("raise_tool_budget",      "tool_use",        _m_raise_tool_budget),
-    ("enable_critic",          "self_correction", _m_enable_critic),
-    ("conditional_router",     "efficiency",      _m_conditional_router),
-    ("enable_retries",         "robustness",      _m_enable_retries),
-    ("bigger_rl_budget",       "reasoning",       _m_bigger_rl_budget),
+    # (name, axis_targeted, mode, apply)
+    # mode: "live"   -> changes inference behavior of the scaffold
+    #       "rl"     -> only meaningful with a real weight trainer
+    ("add_verifier",           "self_correction", "live", _m_add_verifier),
+    ("add_episodic_memory",    "memory",          "live", _m_add_episodic_memory),
+    ("add_semantic_memory",    "generalization",  "live", _m_add_semantic_memory),
+    ("expand_working_memory",  "memory",          "live", _m_expand_working_memory),
+    ("enable_decomposition",   "planning",        "live", _m_enable_decomposition),
+    ("upgrade_search",         "planning",        "live", _m_upgrade_search),
+    ("deepen_search",          "planning",        "live", _m_deepen_search),
+    ("add_tool_code",          "coding",          "live", _m_add_tool_code),
+    ("add_tool_browser",       "tool_use",        "live", _m_add_tool_browser),
+    ("raise_tool_budget",      "tool_use",        "live", _m_raise_tool_budget),
+    ("enable_critic",          "self_correction", "live", _m_enable_critic),
+    ("conditional_router",     "efficiency",      "live", _m_conditional_router),
+    ("enable_retries",         "robustness",      "live", _m_enable_retries),
+    ("bigger_rl_budget",       "reasoning",       "rl",   _m_bigger_rl_budget),
 ]
 
-MUTATION_INDEX = {name: (axis, fn) for name, axis, fn in MUTATIONS}
+MUTATION_INDEX = {
+    name: (axis, mode, fn) for name, axis, mode, fn in MUTATIONS
+}
 
 
 class Mutator:
-    """Fitness-aware mutation operator."""
+    """Fitness-aware mutation operator.
+
+    allow_rl=False quarantines mutations that are phenotypically silent
+    without a weight trainer — otherwise 'improvements' can be credited
+    to genes that changed nothing at inference time.
+    """
 
     def __init__(self, rng: Optional[random.Random] = None,
                  targeted_ratio: float = 0.7):
         self.rng = rng or random.Random()
-        # Fraction of mutations chosen by bottleneck-axis targeting vs uniform.
         self.targeted_ratio = targeted_ratio
 
-    def applicable(self, genome: CandidateGenome) -> List[str]:
+    def applicable(self, genome: CandidateGenome,
+                   allow_rl: bool = False) -> List[str]:
         """Mutations that would actually change this genome."""
         out = []
-        probe = genome.clone(new_id=False)
-        for name, _axis, fn in MUTATIONS:
+        for name, _axis, mode, fn in MUTATIONS:
+            if mode == "rl" and not allow_rl:
+                continue
+            probe = genome.clone(new_id=False)
             test = probe.clone(new_id=False)
             if fn(test) is not None:
                 out.append(name)
@@ -154,9 +166,10 @@ class Mutator:
         return out
 
     def mutate(self, parent: CandidateGenome,
-               bottleneck_axis: Optional[str] = None) -> Tuple[CandidateGenome, str]:
+               bottleneck_axis: Optional[str] = None,
+               allow_rl: bool = False) -> Tuple[CandidateGenome, str]:
         """Produce one mutated child. Returns (child_genome, mutation_name)."""
-        options = self.applicable(parent)
+        options = self.applicable(parent, allow_rl=allow_rl)
         if not options:
             child = parent.clone()
             child.generation = parent.generation + 1
@@ -168,14 +181,14 @@ class Mutator:
         targeted_pool = []
         if bottleneck_axis:
             for name in options:
-                ax, _fn = MUTATION_INDEX[name]
+                ax, _mode, _fn = MUTATION_INDEX[name]
                 if ax == bottleneck_axis:
                     targeted_pool.append(name)
 
         use_targeted = bool(targeted_pool) and self.rng.random() < self.targeted_ratio
         pool = targeted_pool if use_targeted else options
         name = self.rng.choice(pool)
-        _axis, fn = MUTATION_INDEX[name]
+        _axis, _mode, fn = MUTATION_INDEX[name]
 
         child = parent.clone()
         applied = fn(child)

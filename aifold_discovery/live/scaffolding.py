@@ -161,7 +161,8 @@ class GenomeScaffold:
         return steps if ok and steps else []
 
     # ------------------------------------------------------------------
-    async def _solve_core(self, task: Task, context: str) -> Tuple[str, ScaffoldResult]:
+    async def _solve_core(self, task: Task, context: str,
+                          force_plan: bool = False) -> Tuple[str, ScaffoldResult]:
         """One solve attempt (with optional code tool). Returns (text, diag)."""
         res = ScaffoldResult(answer="")
         sys_prompt = self.SYSTEM_BASE
@@ -169,7 +170,7 @@ class GenomeScaffold:
         if context:
             user_parts.append(context)
 
-        if self.g.planning.decomposition:
+        if self.g.planning.decomposition or force_plan:
             steps = await self._plan(task)
             res.decomposed = bool(steps)
             res.n_llm_calls += 1
@@ -221,6 +222,18 @@ class GenomeScaffold:
     async def solve(self, task: Task) -> ScaffoldResult:
         context = self._memory_block(task.type)
 
+        # ---- conditional router: REAL routing decision ----------------
+        # Deliberate path costs extra calls (plan + verify) but is granted
+        # to hard/long tasks even without the verifier gene. This gives
+        # control.router_type a genuine behavioral effect and a measurable
+        # efficiency/correctness tradeoff.
+        route_deliberate = False
+        if self.g.control.router_type == "conditional":
+            route_deliberate = (
+                task.difficulty == "hard" or len(task.prompt) > 1200
+            )
+        deliberate = self.g.model.verifier_enabled or route_deliberate
+
         # Beam search: parallel candidates + majority vote on normalized answer
         beam = 1
         if self.g.planning.search_algorithm in ("beam", "mcts"):
@@ -246,10 +259,12 @@ class GenomeScaffold:
             )
             result = merged
         else:
-            text, result = await self._solve_core(task, context)
+            text, result = await self._solve_core(
+                task, context,
+                force_plan=route_deliberate and not self.g.planning.decomposition)
 
         # ---- verification pass ----------------------------------------
-        if self.g.model.verifier_enabled and result.answer != "":
+        if deliberate and result.answer != "":
             vmsgs = [
                 {"role": "system", "content":
                     "You are a strict verifier. Re-derive the answer "
