@@ -104,6 +104,10 @@ class ExperimentRecord:
 
     # Post-evaluation analysis
     fitness_delta: Dict[str, float] = field(default_factory=dict)
+    # Composite(fitness after) - composite(strongest parent at conception).
+    # THE mutation-effectiveness signal: >0 means this structural change
+    # produced a system better than the one it came from.
+    vs_parent_delta: Optional[float] = None
     failure_summary: str = ""
     diagnosis: str = ""                # e.g. "weak dependency reasoning"
 
@@ -129,9 +133,12 @@ class ExperimentRecord:
             ax: sum(v) / len(v) for ax, v in agg.items() if v
         }
 
-    def finalize(self, fitness_delta: Dict[str, float], diagnosis: str = "") -> None:
+    def finalize(self, fitness_delta: Dict[str, float],
+                 diagnosis: str = "",
+                 vs_parent_delta: Optional[float] = None) -> None:
         self.fitness_delta = fitness_delta
         self.diagnosis = diagnosis
+        self.vs_parent_delta = vs_parent_delta
         self.completed_at = time.time()
 
     def to_dict(self) -> Dict:
@@ -160,6 +167,7 @@ class ExperimentRecord:
                 for e in self.evidences
             ],
             "fitness_delta": self.fitness_delta,
+            "vs_parent_delta": self.vs_parent_delta,
             "failure_summary": self.failure_summary,
             "diagnosis": self.diagnosis,
             "mutation_applied": self.mutation_applied,
@@ -204,8 +212,13 @@ class ExperimentStore:
             if not r.evidences:
                 continue
             key = r.mutation_applied or "origin"
-            delta = sum(r.fitness_delta.values()) if r.fitness_delta else 0.0
-            by_mutation.setdefault(key, []).append(delta)
+            # Prefer parent-relative delta (mutation effectiveness);
+            # fall back to summed axis deltas for seeds.
+            if r.vs_parent_delta is not None:
+                by_mutation.setdefault(key, []).append(r.vs_parent_delta)
+            elif r.fitness_delta:
+                by_mutation.setdefault(key, []).append(
+                    sum(r.fitness_delta.values()))
             by_env.setdefault(r.env_registry_id, []).append(
                 sum(e.pass_rate for e in r.evidences) / max(1, len(r.evidences))
             )

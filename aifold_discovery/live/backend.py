@@ -1,4 +1,4 @@
-"""AI-Fold Live: LLM backends.
+﻿"""AI-Fold Live: LLM backends.
 
 Pluggable inference backends behind one interface. Anything
 OpenAI-compatible works out of the box: OpenAI, Together, Groq,
@@ -19,6 +19,7 @@ import asyncio
 import json
 import os
 import time
+import random
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
@@ -63,16 +64,18 @@ class OpenAICompatBackend(LLMBackend):
     """Works with any /v1/chat/completions endpoint."""
 
     def __init__(self, base_url: str, api_key: str = "x", model: str = "default",
-                 max_concurrency: int = 4):
+                 max_concurrency: int = 4, max_retries: int = 5):
         self.name = f"openai-compat:{base_url}"
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self._sem = asyncio.Semaphore(max_concurrency)
-        self._stats = {"calls": 0, "errors": 0, "prompt_tokens": 0,
-                       "completion_tokens": 0}
+        self.max_retries = max_retries
+        self._stats = {"calls": 0, "errors": 0, "retries": 0,
+                       "prompt_tokens": 0, "completion_tokens": 0}
 
-    async def chat(self, messages, temperature=0.7, max_tokens=1024, stop=None):
+    async def _chat_once(self, messages, temperature, max_tokens, stop,
+                         headers) -> ChatResult:
         payload = {
             "model": self.model,
             "messages": messages,
@@ -81,33 +84,64 @@ class OpenAICompatBackend(LLMBackend):
         }
         if stop:
             payload["stop"] = stop
+        t0 = time.time()
+        try:
+            data = await asyncio.to_thread(
+                _post_json, f"{self.base_url}/chat/completions",
+                payload, headers,
+            )
+            choice = data["choices"][0]["message"]["content"] or ""
+            usage = data.get("usage", {})
+            return ChatResult(
+                text=choice,
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                latency_s=time.time() - t0,
+                backend=self.name,
+            )
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8")[:200]
+            except Exception:
+                pass
+            return ChatResult(text="", latency_s=time.time() - t0,
+                              backend=self.name,
+                              error=f"HTTP {e.code}: {body}")
+        except Exception as e:
+            return ChatResult(text="", latency_s=time.time() - t0,
+                              backend=self.name, error=str(e))
+
+    async def chat(self, messages, temperature=0.7, max_tokens=1024, stop=None):
         headers = {}
         if self.api_key and self.api_key != "x":
             headers["Authorization"] = f"Bearer {self.api_key}"
 
         async with self._sem:
-            t0 = time.time()
-            try:
-                data = await asyncio.to_thread(
-                    _post_json, f"{self.base_url}/chat/completions",
-                    payload, headers,
+            attempt = 0
+            while True:
+                r = await self._chat_once(messages, temperature, max_tokens,
+                                          stop, headers)
+                transient = (
+                    r.error is not None
+                    and ("429" in r.error or "Timeout" in r.error
+                         or "timed out" in r.error.lower()
+                         or "500" in r.error or "502" in r.error
+                         or "503" in r.error or "Connection" in r.error)
                 )
-                self._stats["calls"] += 1
-                choice = data["choices"][0]["message"]["content"] or ""
-                usage = data.get("usage", {})
-                self._stats["prompt_tokens"] += usage.get("prompt_tokens", 0)
-                self._stats["completion_tokens"] += usage.get("completion_tokens", 0)
-                return ChatResult(
-                    text=choice,
-                    prompt_tokens=usage.get("prompt_tokens", 0),
-                    completion_tokens=usage.get("completion_tokens", 0),
-                    latency_s=time.time() - t0,
-                    backend=self.name,
-                )
-            except Exception as e:
-                self._stats["errors"] += 1
-                return ChatResult(text="", latency_s=time.time() - t0,
-                                  backend=self.name, error=str(e))
+                if not transient or attempt >= self.max_retries:
+                    if r.error is not None:
+                        self._stats["errors"] += 1
+                    else:
+                        self._stats["calls"] += 1
+                        self._stats["prompt_tokens"] += r.prompt_tokens
+                        self._stats["completion_tokens"] += r.completion_tokens
+                    return r
+                attempt += 1
+                self._stats["retries"] += 1
+                # Exponential backoff with jitter: 3, 6, 12, 24, 48s (+jitter)
+                delay = min(60.0, 3.0 * (2 ** (attempt - 1))) + random.uniform(0, 1.5)
+                await asyncio.sleep(delay)
 
     def usage_summary(self):
         return dict(self._stats)
@@ -118,7 +152,7 @@ class MockBackend(LLMBackend):
 
     Produces plausible agent-style responses whose QUALITY responds to hints
     embedded in the system/user messages, so scaffolding differences
-    (verifier pass, decomposition, retries) measurably change outcomes —
+    (verifier pass, decomposition, retries) measurably change outcomes â€”
     exactly like a real model would respond differently to better
     scaffolding. Never used when a real backend is detected.
     """
@@ -288,3 +322,4 @@ async def detect_backend(override_base: Optional[str] = None,
         "No LLM backend found. Set AIFOLD_BASE_URL/AIFOLD_API_KEY/AIFOLD_MODEL, "
         "or OPENAI_API_KEY / GROQ_API_KEY, or start Ollama on :11434."
     )
+

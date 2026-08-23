@@ -142,8 +142,21 @@ class DiscoveryEngine:
             a, b = pre_fitness.get(ax), candidate.fitness.get(ax)
             if b is not None:
                 delta[ax] = round(b - (a if a is not None else b), 4)
+
+        # Mutation effectiveness: child vs strongest parent, compared on
+        # COMMON measured axes only (fair while child is mid-evaluation).
+        vs_parent = None
+        if candidate.parent_fitness is not None:
+            common = [ax for ax in candidate.fitness.measured_axes()
+                      if candidate.parent_fitness.get(ax) is not None]
+            if common:
+                c = sum(candidate.fitness.get(ax) for ax in common) / len(common)
+                p = sum(candidate.parent_fitness.get(ax) for ax in common) / len(common)
+                vs_parent = round(c - p, 4)
+
         diagnosis = diagnose(rec, pre_fitness, candidate.fitness)
-        rec.finalize(fitness_delta=delta, diagnosis=diagnosis)
+        rec.finalize(fitness_delta=delta, diagnosis=diagnosis,
+                     vs_parent_delta=vs_parent)
 
         candidate.num_experiments += 1
         candidate.status = "evaluated"
@@ -153,6 +166,7 @@ class DiscoveryEngine:
             "genome": candidate.genome_id,
             "env": spec.registry_id,
             "delta": delta,
+            "vs_parent": vs_parent,
             "diagnosis": diagnosis,
         })
         return rec
@@ -202,6 +216,15 @@ class DiscoveryEngine:
 
             child = Candidate(genome=genome)
             child.status = "unevaluated"
+            # Record parent strength at conception for vs-parent deltas.
+            parents = [p for p in (parent_a, parent_b) if p is not None]
+            baselines = [p.composite_fitness() for p in parents
+                         if p.composite_fitness() is not None]
+            child.parent_composite = max(baselines) if baselines else None
+            strongest = max(parents, key=lambda p: p.composite_fitness() or -1) \
+                if baselines else None
+            child.parent_fitness = (FitnessVector.from_dict(
+                strongest.fitness.to_dict()) if strongest is not None else None)
             children.append(child)
             self._emit("child_created", {
                 "child": genome.genome_id,

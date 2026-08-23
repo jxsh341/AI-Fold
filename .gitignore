@@ -65,3 +65,5 @@ aifold_runs/
 atropos-main/
 _probe.py
 _smoke.py
+sweep*_log.txt
+sweep*_err.txt

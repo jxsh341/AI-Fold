@@ -9,7 +9,8 @@ from aifold_discovery.live.environments import make_env
 
 
 def build_live_registry(group_size: int = 4,
-                        only_ids: Optional[list] = None) -> EnvironmentRegistry:
+                        only_ids: Optional[list] = None,
+                        difficulty_override: Optional[str] = None) -> EnvironmentRegistry:
     """Registry whose env_factory returns real live environments.
 
     Every spec keeps its typed experimental-genome metadata; difficulty
@@ -76,7 +77,11 @@ def build_live_registry(group_size: int = 4,
 
     if only_ids:
         specs = [s for s in specs if s.registry_id in only_ids]
+    if difficulty_override:
+        for s in specs:
+            s.difficulty = difficulty_override
     for s in specs:
-        s.env_factory = (lambda rid=s.registry_id: make_env(rid))
+        s.env_factory = (lambda rid=s.registry_id, diff=s.difficulty:
+                         make_env(rid, difficulty=diff))
         reg.register(s)
     return reg

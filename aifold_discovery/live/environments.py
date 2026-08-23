@@ -17,6 +17,7 @@ All tasks embed a machine-readable JSON block so scaffolds can parse the
 task type; truth never enters the prompt.
 """
 
+import asyncio
 import json
 import re
 import random
@@ -55,14 +56,21 @@ class LiveBaseEnv:
     async def collect_trajectories(self, item) -> Tuple[Optional[Dict], List]:
         scaffold: GenomeScaffold = item["scaffold"]
         n = self.group_size
+
+        async def one_episode(i: int):
+            task = self.generate_task(item["seed"] * 100 + i)
+            res = await scaffold.solve(task)
+            score, correct = self.verify(task, res)
+            return task, res, score, correct
+
+        # Episodes are independent -> run concurrently (backend still caps
+        # global concurrency). Memory writes happen after, in completion order.
+        outs = await asyncio.gather(*[one_episode(i) for i in range(n)])
+
         scores: List[float] = []
         tags = {"self_corrected": False, "tool_calls": 0}
         messages_out = []
-        for i in range(n):
-            seed = item["seed"] * 100 + i
-            task = self.generate_task(seed)
-            res = await scaffold.solve(task)
-            score, correct = self.verify(task, res)
+        for task, res, score, correct in outs:
             scores.append(score)
             tags["tool_calls"] += res.tool_calls
             if correct is False and res.self_corrected and score > 0:
@@ -353,9 +361,12 @@ ENV_CLASSES = {
 }
 
 
-def make_env(registry_id: str):
+def make_env(registry_id: str, difficulty: Optional[str] = None):
     cls = ENV_CLASSES.get(registry_id)
     if cls is None:
         raise KeyError(f"no live env for {registry_id}")
-    return cls()
+    env = cls()
+    if difficulty is not None:
+        env.difficulty = difficulty       # registry drives task hardness
+    return env
 

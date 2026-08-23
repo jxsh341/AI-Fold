@@ -23,6 +23,12 @@ class Candidate:
     rl_steps_completed: int = 0
     # Status: "unevaluated" | "training" | "evaluated" | "retired"
     status: str = "unevaluated"
+    # Composite fitness of the strongest parent at reproduction time.
+    # Baseline for measuring whether THIS genome improved on what made it.
+    parent_composite: Optional[float] = None
+    # Full parent fitness snapshot — enables fair common-axes comparison
+    # even while the child is only partially evaluated.
+    parent_fitness: Optional[FitnessVector] = None
 
     @property
     def genome_id(self) -> str:
