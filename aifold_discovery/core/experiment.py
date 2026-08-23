@@ -50,14 +50,19 @@ class TrajectoryEvidence:
         env_name: str,
         tags: Optional[Dict[str, Any]] = None,
     ) -> "TrajectoryEvidence":
-        """Build evidence from a raw Atropos ScoredDataGroup dict."""
+        """Build evidence from a raw Atropos ScoredDataGroup dict.
+
+        Diagnostics may arrive either via the `tags` argument or inside
+        group_overrides (live environments embed them there).
+        """
         scores = list(group.get("scores") or [])
         masks = list(group.get("masks") or [])
+        overrides = dict(group.get("group_overrides") or {})
+        merged_tags = {**overrides, **(tags or {})}
         n = len(scores)
         mean = sum(scores) / n if n else 0.0
         var = sum((s - mean) ** 2 for s in scores) / n if n else 0.0
         lengths = [sum(1 for m in msk if m != -100) for msk in masks] if masks else []
-        tags = tags or {}
         return cls(
             env_name=env_name,
             tokens=group.get("tokens"),
@@ -71,9 +76,9 @@ class TrajectoryEvidence:
             score_variance=var,
             mean_length_tokens=(sum(lengths) / len(lengths)) if lengths else 0.0,
             had_failures=any(s <= 0 for s in scores),
-            had_self_correction=bool(tags.get("self_corrected", False)),
-            tool_call_count=int(tags.get("tool_calls", 0)),
-            extras=dict(group.get("group_overrides") or {}),
+            had_self_correction=bool(merged_tags.get("self_corrected", False)),
+            tool_call_count=int(merged_tags.get("tool_calls", 0) or 0),
+            extras=overrides,
         )
 
 

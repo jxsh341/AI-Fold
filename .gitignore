@@ -59,3 +59,9 @@ test_*.py
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
+# Discovery run artifacts
+aifold_runs/
+# Atropos upstream checkout (vendored reference)
+atropos-main/
+_probe.py
+_smoke.py
