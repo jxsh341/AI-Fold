@@ -217,9 +217,13 @@ class DiscoveryEngine:
                 genome, label = self.crossover.crossover(parent_a.genome, parent_b.genome)
             else:
                 allow_rl = bool(getattr(self.rl_hook, "trains_weights", False))
-                genome, label = self.mutator.mutate(parent_a.genome,
-                                                    bottleneck_axis=axis,
-                                                    allow_rl=allow_rl)
+                avoid = (parent_a.genome.mutation_history[-1]
+                         if parent_a.genome.mutation_history else None)
+                genome, label = self.mutator.mutate(
+                    parent_a.genome,
+                    bottleneck_axis=axis,
+                    allow_rl=allow_rl,
+                    avoid=avoid)
 
             child = Candidate(genome=genome)
             child.status = "unevaluated"

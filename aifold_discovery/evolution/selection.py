@@ -1,4 +1,4 @@
-"""AI-Fold Discovery: Selection + Novelty.
+﻿"""AI-Fold Discovery: Selection + Novelty.
 
 Selection operates on FitnessVectors (multi-dimensional), not scalar reward:
   - Pareto-front preservation keeps capability specialists alive
@@ -44,7 +44,7 @@ class Selector:
         return min(1.0, d)
 
     def score(self, c: Candidate, pop: List[Candidate]) -> float:
-        comp = c.composite_fitness()
+        comp = c.ranking_fitness()
         enough = sum(1 for ax in c.fitness.measured_axes()
                      if c.fitness.sample_counts.get(ax, 0) >= self.min_samples) > 0
         base = comp if (comp is not None and enough) else -0.05

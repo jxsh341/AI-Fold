@@ -167,9 +167,20 @@ class Mutator:
 
     def mutate(self, parent: CandidateGenome,
                bottleneck_axis: Optional[str] = None,
-               allow_rl: bool = False) -> Tuple[CandidateGenome, str]:
-        """Produce one mutated child. Returns (child_genome, mutation_name)."""
+               allow_rl: bool = False,
+               avoid: Optional[str] = None) -> Tuple[CandidateGenome, str]:
+        """Produce one mutated child. Returns (child_genome, mutation_name).
+
+        Two anti-lock-in rules learned from live sweeps:
+          - targeted fallback: a singleton bottleneck pool (only ONE mutation
+            tagged with the weakest axis) would otherwise be chosen 70% of
+            the time forever -> require >=2 options to use targeting;
+          - avoid: never resample the mutation that produced this very parent
+            (breaks router-chains where one gene replicates down a lineage).
+        """
         options = self.applicable(parent, allow_rl=allow_rl)
+        if avoid and avoid in options and len(options) > 1:
+            options = [o for o in options if o != avoid]
         if not options:
             child = parent.clone()
             child.generation = parent.generation + 1
@@ -185,7 +196,9 @@ class Mutator:
                 if ax == bottleneck_axis:
                     targeted_pool.append(name)
 
-        use_targeted = bool(targeted_pool) and self.rng.random() < self.targeted_ratio
+        use_targeted = len(targeted_pool) >= 2 or (
+            len(targeted_pool) == 1 and self.rng.random() < self.targeted_ratio * 0.5
+        )
         pool = targeted_pool if use_targeted else options
         name = self.rng.choice(pool)
         _axis, _mode, fn = MUTATION_INDEX[name]

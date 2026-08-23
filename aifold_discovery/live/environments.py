@@ -83,8 +83,10 @@ class LiveBaseEnv:
                     f"answer={res.answer} calls={res.n_llm_calls} "
                     f"tools={res.tool_calls} retried={res.retried}"},
             ])
-        if not scores or len(set(scores)) == 1:
-            return None, []
+        # NOTE: uniform-score groups are KEPT. A group where every episode
+        # fails is maximally diagnostic of a capability weakness — discarding
+        # it blinds bottleneck targeting to exactly the axes needing work.
+        # (RL-side advantage degeneracy remains the trainer's concern.)
         return {
             "tokens": [[] for _ in scores],          # RL-tokenization offline
             "masks": [[0] for _ in scores],
@@ -94,6 +96,7 @@ class LiveBaseEnv:
                 "group_size": len(scores),
                 "self_corrected": tags["self_corrected"],
                 "tool_calls": tags["tool_calls"],
+                "uniform_outcome": len(set(scores)) == 1,
             },
         }, []
 

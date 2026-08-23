@@ -2,46 +2,36 @@
 
 **An AlphaFold-inspired discovery engine for AI systems — plus an AF3-derived neural substrate for trajectory prediction.**
 
-> **Read this first:** the live results below are *signal, not a powered study*.
-> Each mutation's effect rests on n≈1–3 evaluated lineages; treat every number
-> as directional. A powered version = ≥10 lineages per mutation × 3 seeds,
-> ~5k calls per mutation class. What the runs *do* establish end-to-end: the
-> loop closes, metrics are unbiased, and selection rejects harmful structure.
+> **Read this first:** every live result below is *signal, not a powered study*
+> (n≈1–6 evaluated lineages per mutation). What the runs establish is that the
+> loop closes end-to-end and — more importantly — that its measurement process
+> survives adversarial probing. Four separate bugs that would have manufactured
+> false discoveries were caught by interrogating our own positive results.
+> A powered version = ≥10 lineages per mutation × 3 seeds (~5k calls/mutation-class).
 
-## Headline live finding (and the retraction that makes it credible)
+## The main live finding is about measurement integrity
 
-Across five live sweeps (~1,100 real LLM calls, zero unhandled failures), the
-most robust result is **negative-space**:
+Across six sweeps (~1,700 real LLM calls, zero unhandled failures), probing
+each apparent success exposed — and fixed — four distinct failure modes that
+silently corrupt evolutionary attribution:
 
-```
-With the verifier gene seeded (3 sweeps):        it held rank #1 in ALL generations;
-                                                 9 tested structural additions never beat it.
-Pure-baseline, all genes behaviorally grounded:  NO structural addition beat the plain
-                                                 baseline either. Two were reliably harmful:
+| # | Bug | How it was caught | Fix |
+|---|-----|-------------------|-----|
+| 1 | **Silent genes**: "winning" mutations (`rl_steps`, router-as-first-implemented) changed nothing at inference | grep proved no scaffold code path consumed them | phenotype contract: mutations tagged `live`/`rl`; `rl` unsampleable without a weight trainer |
+| 2 | **Partial-composite bias**: child vs parent compared different axis sets mid-evaluation | every delta biased negative regardless of architecture | vs-parent computed on *common measured axes* only |
+| 3 | **Capability blindness + lock-in**: uniformly-failing groups discarded as "zero information" → weakest axis invisible → singleton targeted-pool chose one gene 15× while **12 of 13** were never sampled | survivor audit: all gen-3 genes descended from gen-0's two router children | uniform groups retained (maximal weakness evidence); targeted-fallback + anti-repeat rules |
+| 4 | **Coverage dodging**: offspring never measured on its inherited weak axis outranked the parent (0.835 "vs" 0.543) | the winning gene was silent for the axes it improved on | inheritance priors: unmeasured axes imputed at the *parent's* value — dodging ties, fixing wins |
 
-   conditional_router   −0.115 vs-parent   (extra deliberate-path calls not recovered)
-   crossover[clone_a]   −0.197             (children that fail to inherit the load-bearing component)
+With those four sealed, the first trustworthy mechanistic discovery emerged
+(Sweep F): bottleneck targeting correctly identified the baseline's memory
+weakness, sampled `expand_working_memory`, and the child measurably recovered
+on the needle-in-haystack environment (**+0.10 on the memory axis**, the gene's
+exact causal pathway: 16 visible context lines instead of 8). Directionally
+consistent, small n.
 
-   add_episodic_memory  −0.206             (rejected by selection in an earlier sweep;
-                                            sign consistent, n too small to bank)
-```
-
-And the part we consider more valuable than any single number: **our first
-"positive" result was wrong, and the pipeline caught it.** An initial
-pure-baseline sweep showed a +0.144 cross-generation climb. Probing *which*
-mutation caused it revealed both winning genes (`rl_steps`, `conditional_router`
-as then implemented) were **phenotypically silent** — they changed nothing at
-inference time, so the climb was episode-sampling noise riding inert lineages.
-We implemented the router for real, quarantined RL-only mutations behind a
-`trains_weights` flag, fixed a vs-parent metric bias that compared partial child
-composites against full parent composites, and re-ran. The climb disappeared.
-That retraction — published with the debugging trail — is the existence proof
-that fitness attribution in this system tracks *behavior*, not lineage labels.
-
-*(Answering the obvious plateau question directly: generations 0–1 were flat in
-the first sweep because the only mutations sampled were silent or neutral; the
-"jump" arrived exactly when an inert gene got sampled. Post-fix, with sampling
-restricted to live-active genes, flat-everything is the true picture at this budget.)*
+Two reproducible negatives also held across independent sweeps:
+- **Unfaithful crossovers are reliably harmful**: −0.19…−0.31 across three sweeps — same band, three chances to be luck, three refusals.
+- **No structural addition beat the plain baseline within the explored neighborhoods.** Scope: this budget (~100–250 calls/sweep), this 8B model, these five environments, and — before fix #3 — only the 1–2 genes the searcher actually visited. This is *not* evidence that structural search can't work; it's evidence that a search with blind targeting will burn its entire budget re-testing one gene.
 
 AI-Fold asks a different question than ordinary agent frameworks:
 
@@ -61,7 +51,7 @@ The strict boundary: **RL optimizes candidates; AI-Fold evolves candidates.**
 | Claim | Evidence |
 |---|---|
 | Survives free-tier rate limits | retry w/ exponential backoff + jitter rode out a 64-consecutive-429 storm |
-| Scales to real sweeps | concurrent episodes + candidate-level parallelism; 234-call sweep in ~7 min |
+| Scales to real sweeps | concurrent episodes + candidate parallelism; 234-call sweep in ~7 min |
 | Deterministic scoring | all four environments verified locally (exact-match, executed unit tests, needle lookup) — no judge model in the measurement path |
 
 ---
@@ -169,7 +159,7 @@ Registry entries can equally point at real **Atropos** `BaseEnv` classes (`env_f
 
 Every experiment persists full provenance to `aifold_runs/experiments/all_records.jsonl`: genome snapshot → environment → trajectory group → per-axis fitness delta → **vs-parent delta** (child vs strongest parent, computed on common measured axes so partial evaluations never bias the comparison) → failure diagnosis → mutation lineage.
 
-Mutation sampling respects a phenotype contract: mutations are tagged `live` (changes inference behavior of the scaffold) or `rl` (inert without a weight trainer). RL-mode mutations cannot be sampled — or credited — until `GrpoHook` is wired, which closes the silent-gene hole that produced the retracted +0.144 result.
+Ranking uses a coverage-safe score (`ranking_fitness`): unmeasured axes are imputed at the parent's measured value, so an offspring that dodges measuring an inherited weakness ties the parent - never beats it. Reporting uses the plain measured composite; ranking uses coverage. Conflating the two was bug #4. Mutation sampling also enforces anti-repeat (a parent's own mutation is never resampled) and targeted-fallback (singleton bottleneck pools cannot dominate draws).
 
 ### Going fully live with Atropos RL
 

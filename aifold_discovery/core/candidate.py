@@ -1,4 +1,4 @@
-"""AI-Fold Discovery: Candidate and Population.
+﻿"""AI-Fold Discovery: Candidate and Population.
 
 A Candidate couples a genome (structure) with its measured fitness
 (capability profile) and full experimental lineage.
@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from aifold_discovery.core.genome import CandidateGenome
-from aifold_discovery.core.fitness import FitnessVector
+from aifold_discovery.core.fitness import FitnessVector, AXES
 
 
 @dataclass
@@ -26,7 +26,7 @@ class Candidate:
     # Composite fitness of the strongest parent at reproduction time.
     # Baseline for measuring whether THIS genome improved on what made it.
     parent_composite: Optional[float] = None
-    # Full parent fitness snapshot — enables fair common-axes comparison
+    # Full parent fitness snapshot â€” enables fair common-axes comparison
     # even while the child is only partially evaluated.
     parent_fitness: Optional[FitnessVector] = None
 
@@ -39,7 +39,26 @@ class Candidate:
         return self.genome.generation
 
     def composite_fitness(self) -> Optional[float]:
+        """Measured-axes composite (reporting). See also ranking_fitness()."""
         return self.fitness.composite()
+
+    def ranking_fitness(self) -> float:
+        """Coverage-safe score for SELECTION/RANKING.
+
+        Unmeasured axes are imputed from the parent's measured value where
+        available (an offspring that dodges measuring an inherited weakness
+        ties, never wins), falling back to a weak global prior otherwise.
+        Sweep F lesson: 0.835-without-memory-axis vs 0.543-with was a
+        coverage artifact, not improvement.
+        """
+        priors = {}
+        if self.parent_fitness is not None:
+            for ax in AXES:
+                pv = self.parent_fitness.get(ax)
+                if pv is not None:
+                    priors[ax] = pv
+        cc = self.fitness.coverage_composite(priors=priors)
+        return cc if cc is not None else float("-inf")
 
     def bottleneck(self):
         return self.fitness.weakest_axis()
@@ -125,7 +144,7 @@ class Population:
             ranked = sorted(
                 self.candidates.values(),
                 key=lambda c: (
-                    -(c.composite_fitness() if c.composite_fitness() is not None else -1.0),
+                    -(c.ranking_fitness()),
                     -c.num_experiments,
                 ),
             )

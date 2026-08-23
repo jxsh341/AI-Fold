@@ -56,7 +56,45 @@ class FitnessVector:
         weights: Optional[Dict[str, float]] = None,
         min_confidence: int = 0,
     ) -> Optional[float]:
-        """Weighted mean over measured axes with enough evidence."""
+        """Weighted mean over MEASURED axes with enough evidence.
+
+        Measurement/reporting metric. For ranking candidates with different
+        axis coverage, use coverage_composite() instead.
+        """
+        w = weights or {}
+        num, den = 0.0, 0.0
+        for ax in self.measured_axes():
+            if self.sample_counts.get(ax, 0) < min_confidence:
+                continue
+            weight = w.get(ax, 1.0)
+            num += weight * self.scores[ax]
+            den += weight
+        return num / den if den > 0 else None
+
+    def coverage_composite(self, prior: float = 0.35,
+                           weights: Optional[Dict[str, float]] = None,
+                           min_confidence: int = 0,
+                           priors: Optional[Dict[str, float]] = None
+                           ) -> Optional[float]:
+        """Composite over ALL axes, imputing unmeasured ones.
+
+        RANKING-SAFE comparison across different axis-coverage sets.
+        `priors` allows per-axis imputation values; pass the PARENT's
+        measured scores so an offspring that dodges measuring an inherited
+        weakness inherits that weakness's value instead of a free upgrade.
+        """
+        w = weights or {}
+        p = priors or {}
+        num, den = 0.0, 0.0
+        for ax in AXES:
+            weight = w.get(ax, 1.0)
+            v = self.scores.get(ax)
+            if v is not None and self.sample_counts.get(ax, 0) >= min_confidence:
+                num += weight * v
+            else:
+                num += weight * p.get(ax, prior)
+            den += weight
+        return num / den if den > 0 else None
         w = weights or {}
         num, den = 0.0, 0.0
         for ax in self.measured_axes():
