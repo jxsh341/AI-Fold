@@ -22,12 +22,30 @@ silently corrupt evolutionary attribution:
 | 3 | **Capability blindness + lock-in**: uniformly-failing groups discarded as "zero information" → weakest axis invisible → singleton targeted-pool chose one gene 15× while **12 of 13** were never sampled | survivor audit: all gen-3 genes descended from gen-0's two router children | uniform groups retained (maximal weakness evidence); targeted-fallback + anti-repeat rules |
 | 4 | **Coverage dodging**: offspring never measured on its inherited weak axis outranked the parent (0.835 "vs" 0.543) | the winning gene was silent for the axes it improved on | inheritance priors: unmeasured axes imputed at the *parent's* value — dodging ties, fixing wins |
 
-With those four sealed, the first trustworthy mechanistic discovery emerged
-(Sweep F): bottleneck targeting correctly identified the baseline's memory
-weakness, sampled `expand_working_memory`, and the child measurably recovered
-on the needle-in-haystack environment (**+0.10 on the memory axis**, the gene's
-exact causal pathway: 16 visible context lines instead of 8). Directionally
-consistent, small n.
+**Bug #4 is worth isolating because it is not really about this repo.** Any
+system that ranks candidates by scores aggregated over partially-measured
+dimensions faces it: multi-objective evolutionary search, model selection
+with per-benchmark evals, RLHF pipelines where some capability axes go
+unmeasured at some checkpoints. The naive fix - impute a single global
+prior for unmeasured axes - silently *rewards* candidates for avoiding
+measurement of inherited weaknesses, because the prior usually exceeds a
+truthfully-earned low score. The structural fix is lineage imputation:
+an unmeasured axis should inherit the strongest prior evidence available
+about it, which for an offspring is its parent's measured value. Dodging
+then ties instead of winning; genuine improvement still wins. We found no
+prior art naming this failure mode and would point to it if it exists.
+
+With those four sealed, Sweep F produced a finding we trust for its *functional
+form* rather than any fitness delta: **needle-env pass rate tracks context-
+visibility almost exactly.** The gene `working_memory_size` controls how many
+haystack lines enter the prompt, so visibility is computable: 8/38 = 21% at the
+baseline, 16/38 = 42% after mutation. Observed pass rates: **1/4 (25%)** at wm=8;
+**5/12 (42%) pooled across all three wm=16 candidates.** The mechanism is checkable
+from raw episode counts - no fitness machinery involved. What we do *not* claim:
+the single paired parent-child comparison (1/4 -> 2/4, n=4) is itself significant,
+and one audit catch remains open: an earlier wiring bug meant `--group-size` was
+silently ignored (all sweeps ran n=4), so these counts are exact but smaller than
+the flags implied.
 
 Two reproducible negatives also held across independent sweeps:
 - **Unfaithful crossovers are reliably harmful**: −0.19…−0.31 across three sweeps — same band, three chances to be luck, three refusals.

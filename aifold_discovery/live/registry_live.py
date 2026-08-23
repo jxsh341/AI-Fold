@@ -81,7 +81,8 @@ def build_live_registry(group_size: int = 4,
         for s in specs:
             s.difficulty = difficulty_override
     for s in specs:
-        s.env_factory = (lambda rid=s.registry_id, diff=s.difficulty:
-                         make_env(rid, difficulty=diff))
+        s.env_factory = (lambda rid=s.registry_id, diff=s.difficulty,
+                         gs=s.group_size:
+                         make_env(rid, difficulty=diff, group_size=gs))
         reg.register(s)
     return reg

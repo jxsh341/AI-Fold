@@ -364,12 +364,15 @@ ENV_CLASSES = {
 }
 
 
-def make_env(registry_id: str, difficulty: Optional[str] = None):
+def make_env(registry_id: str, difficulty: Optional[str] = None,
+             group_size: Optional[int] = None):
     cls = ENV_CLASSES.get(registry_id)
     if cls is None:
         raise KeyError(f"no live env for {registry_id}")
     env = cls()
     if difficulty is not None:
         env.difficulty = difficulty       # registry drives task hardness
+    if group_size is not None:
+        env.group_size = group_size       # registry drives episode count
     return env
 
