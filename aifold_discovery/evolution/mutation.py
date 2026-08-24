@@ -77,13 +77,17 @@ def _m_add_tool_code(g: CandidateGenome) -> str:
     g.tools.enabled_tools.append("code")
     return "add_tool_code"
 
-def _m_add_tool_browser(g: CandidateGenome) -> str:
-    if "browser" in g.tools.enabled_tools:
-        return None
-    g.tools.enabled_tools.append("browser")
-    return "add_tool_browser"
+def _m_add_tool_browser(g: CandidateGenome) -> Optional[str]:
+    # UNWIRED: no browser runtime exists in the live scaffold, so this gene
+    # would be phenotypically silent. Kept in the vocabulary but excluded
+    # from sampling (mode="unwired") until a real tool runtime lands.
+    return None
 
-def _m_raise_tool_budget(g: CandidateGenome) -> str:
+def _m_raise_tool_budget(g: CandidateGenome) -> Optional[str]:
+    # Only meaningful when the code tool exists - the budget gates the
+    # sandbox loop. Self-gating keeps the phenotype contract honest.
+    if "code" not in g.tools.enabled_tools:
+        return None
     old = g.tools.max_tool_calls_per_episode
     g.tools.max_tool_calls_per_episode = min(32, old * 2)
     return f"tool_budget_{old}->{g.tools.max_tool_calls_per_episode}"
@@ -115,22 +119,23 @@ def _m_bigger_rl_budget(g: CandidateGenome) -> str:
 
 MUTATIONS = [
     # (name, axis_targeted, mode, apply)
-    # mode: "live"   -> changes inference behavior of the scaffold
-    #       "rl"     -> only meaningful with a real weight trainer
-    ("add_verifier",           "self_correction", "live", _m_add_verifier),
-    ("add_episodic_memory",    "memory",          "live", _m_add_episodic_memory),
-    ("add_semantic_memory",    "generalization",  "live", _m_add_semantic_memory),
-    ("expand_working_memory",  "memory",          "live", _m_expand_working_memory),
-    ("enable_decomposition",   "planning",        "live", _m_enable_decomposition),
-    ("upgrade_search",         "planning",        "live", _m_upgrade_search),
-    ("deepen_search",          "planning",        "live", _m_deepen_search),
-    ("add_tool_code",          "coding",          "live", _m_add_tool_code),
-    ("add_tool_browser",       "tool_use",        "live", _m_add_tool_browser),
-    ("raise_tool_budget",      "tool_use",        "live", _m_raise_tool_budget),
-    ("enable_critic",          "self_correction", "live", _m_enable_critic),
-    ("conditional_router",     "efficiency",      "live", _m_conditional_router),
-    ("enable_retries",         "robustness",      "live", _m_enable_retries),
-    ("bigger_rl_budget",       "reasoning",       "rl",   _m_bigger_rl_budget),
+    # mode: "live"    -> changes inference behavior of the scaffold
+    #       "rl"      -> only meaningful with a real weight trainer
+    #       "unwired" -> conceptually live, no runtime yet; excluded
+    ("add_verifier",           "self_correction", "live",    _m_add_verifier),
+    ("add_episodic_memory",    "memory",          "live",    _m_add_episodic_memory),
+    ("add_semantic_memory",    "generalization",  "live",    _m_add_semantic_memory),
+    ("expand_working_memory",  "memory",          "live",    _m_expand_working_memory),
+    ("enable_decomposition",   "planning",        "live",    _m_enable_decomposition),
+    ("upgrade_search",         "planning",        "live",    _m_upgrade_search),
+    ("deepen_search",          "planning",        "live",    _m_deepen_search),
+    ("add_tool_code",          "coding",          "live",    _m_add_tool_code),
+    ("add_tool_browser",       "tool_use",        "unwired", _m_add_tool_browser),
+    ("raise_tool_budget",      "tool_use",        "live",    _m_raise_tool_budget),
+    ("enable_critic",          "self_correction", "live",    _m_enable_critic),
+    ("conditional_router",     "efficiency",      "live",    _m_conditional_router),
+    ("enable_retries",         "robustness",      "live",    _m_enable_retries),
+    ("bigger_rl_budget",       "reasoning",       "rl",      _m_bigger_rl_budget),
 ]
 
 MUTATION_INDEX = {
@@ -158,6 +163,8 @@ class Mutator:
         for name, _axis, mode, fn in MUTATIONS:
             if mode == "rl" and not allow_rl:
                 continue
+            if mode == "unwired":
+                continue          # no runtime -> phenotypically silent
             probe = genome.clone(new_id=False)
             test = probe.clone(new_id=False)
             if fn(test) is not None:

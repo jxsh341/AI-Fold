@@ -64,6 +64,28 @@ The strict boundary: **RL optimizes candidates; AI-Fold evolves candidates.**
 
 ---
 
+### Phenotype & wiring audit (the silent-no-op class)
+
+The `--group-size` catch was a *different bug category* than the four
+measurement bugs: plain wiring that ran fine while doing something other than
+what was asked. That class doesn't announce itself, so before calling this
+locked we traced every knob to its consumption site (`tools/phenotype_audit.py`,
+rerunnable):
+
+| Knob | Consumed at | Status |
+|---|---|---|
+| `--generations / --n-envs / --max-calls / --difficulty / --pure-baseline` | runner loop, registry override, seed count | OK |
+| `--group-size` | registry → spec → **env instance attribute** | fixed (was silently dropped) |
+| `--max-concurrency` | backend semaphore | OK |
+| genes: verifier, episodic/semantic memory, working_memory, decomposition, beam search, critic, retries, router, code tool | scaffolding call paths | OK |
+| gene: browser tool | — | **was unwired** → mode=`unwired`, excluded from sampling until a runtime exists |
+| mutation: raise_tool_budget | sandbox loop only | now self-gates on code-tool presence |
+
+Result: 11 live-sampleable mutations, each with a verified consumption path.
+`unwired` joins `rl` in the excluded set - the phenotype contract now has three
+states (changes behavior / needs weights / needs a runtime), and nothing lands
+in the sampleable pool without proof it executes.
+
 ### Infrastructure reliability (separate from the science)
 
 | Claim | Evidence |

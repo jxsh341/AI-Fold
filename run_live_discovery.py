@@ -140,8 +140,6 @@ async def main():
 
     async def live_run(self, genome, n_groups=2, group_size=None, **kw):
         env = self.env
-        gs = group_size or getattr(getattr(env, "config", None),
-                                   "group_size", self.spec.group_size)
         scaffold = GenomeScaffold(genome, bbackend)
         evidences = []
         for _g in range(n_groups):
