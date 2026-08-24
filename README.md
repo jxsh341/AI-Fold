@@ -81,7 +81,9 @@ rerunnable):
 | gene: browser tool | — | **was unwired** → mode=`unwired`, excluded from sampling until a runtime exists |
 | mutation: raise_tool_budget | sandbox loop only | now self-gates on code-tool presence |
 
-Result: 11 live-sampleable mutations, each with a verified consumption path.
+Consumption-site tracing alone missed two more of this class: `search_depth` was read by nothing (so `deepen_search` mutated a dead field), and `upgrade_search`'s first ladder step (none->bfs at depth 1) changed no behavior because refinement required depth > 1. Both were caught by `tools/behavior_audit.py`, which goes further than call-graph tracing: for every sampleable gene it runs paired OFF/ON scaffolds against a scripted backend and asserts the documented *behavioral* difference (verify stage fires, sandbox executes, context doubles, retry recovers). Current status: **12/12 behavioral checks pass**, covering all 11 live-sampleable genes. Rerun after any scaffold change; a gene whose check starts failing is a gene that stopped meaning anything.
+
+Result: 11 live-sampleable mutations, each with verified consumption AND a passing behavioral difference check.
 `unwired` joins `rl` in the excluded set - the phenotype contract now has three
 states (changes behavior / needs weights / needs a runtime), and nothing lands
 in the sampleable pool without proof it executes.

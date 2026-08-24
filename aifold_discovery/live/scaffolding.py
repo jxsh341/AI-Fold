@@ -51,6 +51,7 @@ class ScaffoldResult:
     self_corrected: bool = False   # initial wrong -> final right (env-tagged)
     decomposed: bool = False
     verified: bool = False
+    refinements: int = 0           # search_depth-driven refine rounds used
     transcript: List[Dict[str, str]] = field(default_factory=list)
     error: Optional[str] = None
 
@@ -234,10 +235,12 @@ class GenomeScaffold:
             )
         deliberate = self.g.model.verifier_enabled or route_deliberate
 
-        # Beam search: parallel candidates + majority vote on normalized answer
+        # Beam search: candidate count driven by planning.search_depth so
+        # that deepen_search has an observable effect (more candidates ->
+        # more calls -> vote over wider sample).
         beam = 1
         if self.g.planning.search_algorithm in ("beam", "mcts"):
-            beam = 3
+            beam = max(2, min(5, self.g.planning.search_depth))
 
         attempts: List[ScaffoldResult] = []
         if beam > 1:
@@ -262,6 +265,35 @@ class GenomeScaffold:
             text, result = await self._solve_core(
                 task, context,
                 force_plan=route_deliberate and not self.g.planning.decomposition)
+
+        # ---- search-depth refinement (bfs/beam/mcts) ------------------
+        # depth=1 -> single pass; each extra depth adds one self-refine
+        # round feeding the current answer back. Gives deepen_search an
+        # observable effect under ANY enabled algorithm.
+        if (self.g.planning.search_algorithm != "none"
+                and result.answer):
+            # Any enabled algorithm refines at least once (so upgrade_search
+            # is behaviorally distinct from none); extra rounds scale with
+            # search_depth.
+            rounds = max(1, min(3, self.g.planning.search_depth - 0))
+            rounds = min(rounds, 3)
+            for _ in range(rounds):
+                rmsgs = [
+                    {"role": "system", "content":
+                        "Refine your answer. Re-check the task, fix any "
+                        "error in your previous reasoning or result, then "
+                        "reply FINAL_ANSWER: <answer>."},
+                    {"role": "user", "content":
+                        task.prompt + f"\n\nPREVIOUS ANSWER: {result.answer}"},
+                ]
+                rtext, ok = await self._chat(rmsgs, temperature=0.2)
+                result.n_llm_calls += 1
+                result.refinements += 1
+                ra = extract_answer(rtext) if ok else ""
+                if ra:
+                    if _norm_number(ra) != _norm_number(result.answer):
+                        result.self_corrected = True
+                    result.answer = ra
 
         # ---- verification pass ----------------------------------------
         if deliberate and result.answer != "":
